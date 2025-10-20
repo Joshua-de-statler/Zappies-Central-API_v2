@@ -19,7 +19,10 @@ class Settings:
 
     # --- Google Calendar ---
     GOOGLE_CALENDAR_ID: str = os.getenv("GOOGLE_CALENDAR_ID", "primary")
+    # File-based (original)
     SERVICE_ACCOUNT_FILE: str = "service_account.json"
+    # String-based (from voice agent, better for deployment)
+    GOOGLE_CREDENTIALS_STR: str = os.getenv("GOOGLE_CREDENTIALS_JSON")
 
     # --- API and Security ---
     API_SECRET_KEY: str = os.getenv("API_SECRET_KEY", "DEFAULT_SECRET_KEY")
@@ -60,6 +63,17 @@ class Settings:
         "APPLIES_TO", "CONCERNS", "PROHIBITS", "REQUIRES", "INCLUDES",
         "HAS_CONDITION", "MUST_PERFORM", "HAS_FEE"
     ]
+
+    # --- Voice Agent Business Logic ---
+    # Nested class to group voice agent settings
+    class VOICE_AGENT_CONFIG:
+        TIMEZONE: str = 'Africa/Johannesburg'
+        BUSINESS_HOURS_START: int = 8  # 8 AM
+        BUSINESS_HOURS_END: int = 16  # 4 PM
+        APPOINTMENT_DURATION_MINUTES: int = 60
+        SEARCH_WINDOW_DAYS: int = 14
+        SUGGESTION_COUNT: int = 5
+
 
 # Instantiate settings for easy import across the application
 settings = Settings()
