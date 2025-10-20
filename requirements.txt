@@ -1,0 +1,27 @@
+# --- Core Web Framework ---
+fastapi
+uvicorn
+
+# --- AI & LangChain (Modern, compatible versions) ---
+langchain
+langchain-community
+langchain-experimental
+langchain-google-genai
+langchain-neo4j
+langchain-text-splitters
+pypdf
+
+# --- Databases ---
+supabase
+neo4j
+
+# --- Utilities ---
+python-dotenv
+pydantic
+tiktoken
+python-dateutil
+
+# --- Google Calendar API ---
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
