@@ -6,7 +6,7 @@ import pytz
 import json
 
 from fastapi import FastAPI, HTTPException, Depends, Header, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from supabase.client import Client, create_client
 from config.settings import settings
 from agent.agent_factory import create_agent_executor
@@ -14,8 +14,17 @@ from langchain.memory import ConversationBufferMemory
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, messages_from_dict, messages_to_dict
 from collections import defaultdict
-from fastapi.responses import HTMLResponse
-from tools.google_calendar import create_calendar_event
+from fastapi.responses import HTMLResponse, JSONResponse
+from dateutil.parser import parse
+
+# --- Import Harmonized Tools & Schemas ---
+from tools.google_calendar import create_calendar_event, get_available_slots
+from tools.email_sender import send_direct_booking_confirmation
+from tools.action_schemas import (
+    CheckAvailabilityArgs,
+    VoiceBookingRequest,
+    CallLogRequest
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,6 +35,10 @@ app = FastAPI(
     version=settings.API_VERSION
 )
 
+# --- Centralized Timezone ---
+SAST_TZ = pytz.timezone(settings.VOICE_AGENT_CONFIG.TIMEZONE)
+
+# --- API Key Verification ---
 async def verify_api_key(x_api_key: str = Header()):
     if not settings.API_SECRET_KEY:
         raise HTTPException(
@@ -38,11 +51,13 @@ async def verify_api_key(x_api_key: str = Header()):
             detail="Invalid or missing API Key."
         )
 
+# --- Central Supabase Client & Concurrency Locks ---
 agent_semaphore = asyncio.Semaphore(settings.CONCURRENCY_LIMIT)
 supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-
 conversation_locks = defaultdict(asyncio.Lock)
 
+
+# --- Chat History Class (Unchanged) ---
 class SupabaseChatMessageHistory(BaseChatMessageHistory):
     def __init__(self, session_id: str, table_name: str):
         self.session_id = session_id
@@ -58,21 +73,16 @@ class SupabaseChatMessageHistory(BaseChatMessageHistory):
 
         history_data = response.data[0]['history']
 
-        # --- THIS IS THE FIX ---
-        # Iterate through the history and fix any malformed tool_calls before validation
         for message_data in history_data:
             if message_data.get("type") == "ai":
                 ai_data = message_data.get("data", {})
                 tool_calls = ai_data.get("tool_calls")
                 if tool_calls and isinstance(tool_calls, list):
                     for tool_call in tool_calls:
-                        # If args is a string, attempt to convert it to a dict
                         if "args" in tool_call and isinstance(tool_call["args"], str):
                             try:
-                                # First, try to parse it as JSON
                                 tool_call["args"] = json.loads(tool_call["args"])
                             except json.JSONDecodeError:
-                                # If it's not JSON, wrap it in a dict
                                 tool_call["args"] = {"query": tool_call["args"]}
         
         return messages_from_dict(history_data)
@@ -86,7 +96,6 @@ class SupabaseChatMessageHistory(BaseChatMessageHistory):
         for message in messages:
             message_dict = messages_to_dict([message])[0]
             if isinstance(message, AIMessage) and hasattr(message, 'tool_calls') and message.tool_calls:
-                # Ensure the tool_calls are in the correct format before saving
                 message_dict['data']['tool_calls'] = message.tool_calls
             new_history_dicts.append(message_dict)
 
@@ -101,6 +110,10 @@ class SupabaseChatMessageHistory(BaseChatMessageHistory):
     def clear(self) -> None:
         supabase.table(self.table_name).delete().eq("conversation_id", self.session_id).execute()
 
+# --- ======================================= ---
+# --- WHATSAPP / TEXT AGENT ENDPOINTS (EXISTING)
+# --- ======================================= ---
+
 class ChatRequest(BaseModel):
     conversation_id: str
     query: str
@@ -111,8 +124,6 @@ async def chat_with_agent(request: ChatRequest):
 
     async with lock:
         try:
-            # --- THIS IS A FIX ---
-            # Removed .single() to prevent errors on the first turn of a conversation.
             status_response = supabase.table("conversation_history").select("status").eq("conversation_id", request.conversation_id).execute()
             
             if status_response.data and status_response.data[0].get('status') == 'handover':
@@ -139,31 +150,21 @@ async def chat_with_agent(request: ChatRequest):
 
                 agent_executor, tool_callback = create_agent_executor(memory, conversation_id=request.conversation_id)
 
-                sast_tz = pytz.timezone("Africa/Johannesburg")
-                current_time_sast = datetime.datetime.now(sast_tz).strftime('%A, %Y-%m-%d %H:%M:%S %Z')
+                current_time_sast = datetime.datetime.now(SAST_TZ).strftime('%A, %Y-%m-%d %H:%M:%S %Z')
 
                 agent_input = {
                     "input": request.query,
                     "current_time": current_time_sast,
                     "conversation_id": request.conversation_id
                 }
-                logger.info(f"--- AGENT INPUT FOR CONVO ID: {request.conversation_id} ---")
-                logger.info(agent_input)
-                logger.info("----------------------------------------------------")
                 
                 response = await agent_executor.ainvoke(agent_input)
-
                 agent_output = response.get("output")
                 
                 tool_calls = tool_callback.tool_calls
                 ai_message = AIMessage(content=agent_output)
                 if tool_calls:
                     ai_message.tool_calls = tool_calls
-
-                # message_history.add_messages([
-                #     HumanMessage(content=request.query),
-                #     ai_message
-                # ])
 
                 if not agent_output or not agent_output.strip():
                     logger.warning(f"Agent for convo ID {request.conversation_id} generated an empty response. Sending a default message.")
@@ -213,3 +214,162 @@ async def confirm_meeting(meeting_id: str):
     except Exception as e:
         logger.error(f"Error confirming meeting {meeting_id}: {e}", exc_info=True)
         return "<h1>Error</h1><p>Sorry, something went wrong while confirming your meeting. Please try again later.</p>"
+
+# --- ================================= ---
+# --- VOICE AGENT ENDPOINTS (NEW)
+# --- ================================= ---
+
+@app.post("/get-availability", dependencies=[Depends(verify_api_key)])
+async def get_voice_availability(request: CheckAvailabilityArgs):
+    """
+    Provides available slots for a given date.
+    This is a direct, procedural endpoint for the voice agent.
+    """
+    try:
+        # 1. Check if the requested date is valid
+        now_sast = datetime.datetime.now(SAST_TZ)
+        requested_date = datetime.datetime.fromisoformat(request.date).date()
+
+        if requested_date < now_sast.date():
+            return JSONResponse(
+                status_code=400,
+                content={"status": "unavailable", "message": "Sorry, that date is in the past."}
+            )
+        
+        # 2. Get available slots using the harmonized function
+        slots = get_available_slots(request.date)
+        
+        if not slots:
+            return {"status": "unavailable", "message": "Sorry, I couldn't find any open 1-hour slots on that day."}
+        
+        # 3. Format slots for the voice agent
+        formatted_suggestions = []
+        for slot_iso in slots:
+            dt_sast = parse(slot_iso).astimezone(SAST_TZ)
+            human_readable = dt_sast.strftime('%A, %B %d at %-I:%M %p')
+            formatted_suggestions.append({"human_readable": human_readable, "iso_8061": slot_iso})
+
+        return {
+            "status": "available_slots_found",
+            "message": "Sure, here are some available times for that day:",
+            "next_available_slots": formatted_suggestions
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in /get-availability: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
+
+@app.post("/log-call", dependencies=[Depends(verify_api_key)])
+async def log_call_history(request: CallLogRequest):
+    """
+    Logs the details of a call that did NOT result in a meeting.
+    To be called by the voice agent upon disqualification or call termination.
+    """
+    try:
+        call_data = request.model_dump(exclude_unset=True)
+        # Ensure the key flag is explicitly set, even if default
+        call_data["resulted_in_meeting"] = request.resulted_in_meeting 
+
+        supabase.table("call_history").insert(call_data).execute()
+        logger.info(f"Successfully logged call for {request.client_number or 'Unknown'}.")
+        return {"message": "Call log received."}
+        
+    except Exception as e:
+        logger.error(f"Error in /log-call: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
+
+@app.post("/book-appointment", dependencies=[Depends(verify_api_key)])
+async def book_voice_appointment(request: VoiceBookingRequest):
+    """
+    Books an appointment *immediately* (synchronously).
+    Used by the voice agent.
+    1. Creates Google Calendar event.
+    2. Sends a *direct* confirmation email (no link).
+    3. Logs to 'meetings' table as 'confirmed'.
+    4. Logs to 'call_history' table as 'resulted_in_meeting: True'.
+    """
+    try:
+        # 1. Prepare event details
+        summary = f"Onboarding call with {request.name} from {request.company_name} to discuss the 'Project Pipeline AI'."
+        description = (
+            f"Stated Goal: {request.goal}\n"
+            f"Stated Budget: R{request.monthly_budget}/month\n\n"
+            f"Lead Contact: {request.email}\n"
+            f"Lead Phone: {request.client_number}"
+        )
+        
+        # 2. Create Google Calendar event *immediately*
+        created_event = create_calendar_event(
+            start_time=request.start_time,
+            summary=summary,
+            description=description,
+            attendees=[request.email]
+        )
+        logger.info(f"Successfully created Google Calendar event for {request.email}.")
+        
+        # 3. Log to 'meetings' table with 'confirmed' status
+        meeting_data = {
+            "full_name": request.name,
+            "email": request.email,
+            "company_name": request.company_name,
+            "start_time": request.start_time,
+            "goal": request.goal,
+            "monthly_budget": request.monthly_budget,
+            "client_number": request.client_number,
+            "google_calendar_event_id": created_event.get('id'),
+            "status": "confirmed" # Directly confirmed
+        }
+        supabase.table("meetings").insert(meeting_data).execute()
+        logger.info(f"Successfully saved confirmed meeting to 'meetings' table for {request.email}.")
+
+        # 4. Log to 'call_history' table
+        call_data = {
+            "full_name": request.name,
+            "email": request.email,
+            "company_name": request.company_name,
+            "goal": request.goal,
+            "monthly_budget": request.monthly_budget,
+            "client_number": request.client_number,
+            "call_duration_seconds": request.call_duration_seconds,
+            "resulted_in_meeting": True,
+            "disqualification_reason": None
+        }
+        supabase.table("call_history").insert(call_data).execute()
+        logger.info(f"Successfully logged booked call to 'call_history' for {request.email}.")
+        
+        # 5. Send direct confirmation email (Your requested feature)
+        try:
+            start_time_sast = parse(request.start_time).astimezone(SAST_TZ)
+            human_readable_time = start_time_sast.strftime('%A, %B %d at %-I:%M %p %Z')
+            send_direct_booking_confirmation(
+                recipient_email=request.email,
+                full_name=request.name,
+                start_time=human_readable_time
+            )
+        except Exception as email_error:
+            # Log the error, but don't fail the entire booking
+            logger.error(f"Failed to send direct confirmation email for {request.email}: {email_error}", exc_info=True)
+
+        # 6. Return the specific success message for the voice agent
+        first_name = request.name.strip().split(' ')[0]
+        success_message = (
+            f"Perfect, {first_name}! I've successfully booked your 1-hour call. "
+            f"I've just sent a confirmation email and a calendar invitation to {request.email} to confirm."
+        )
+        return {"message": success_message}
+
+    except ValidationError as e:
+        logger.warning(f"Validation error in /book-appointment: {e.errors()}")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Missing or invalid required fields.", "details": e.errors()}
+        )
+    except ValueError as e: # Catch booking in the past
+        logger.warning(f"Booking validation error: {str(e)}")
+        return JSONResponse(
+            status_code=400,
+            content={"error": str(e)}
+        )
+    except Exception as e:
+        logger.error(f"A general error occurred in /book-appointment: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
