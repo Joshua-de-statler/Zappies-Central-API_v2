@@ -86,6 +86,13 @@ def check_availability(date_input: str) -> str:
         logger.error(f"Unexpected error in check_availability for '{date_input}': {e}", exc_info=True)
         return "I encountered an error trying to check the availability. Please try again."
 
+def book_zappies_onboarding_call_from_json(json_string: str) -> str:
+    logger.info(f"--- ACTION: Booking Zappies AI Onboarding Call ---")
+    try:
+        data = json.loads(json_string)
+        validated_args = BookOnboardingCallArgs(**data)
+    except (json.JSONDecodeError, ValidationError) as e:
+        return f"I'm sorry, there was a problem with the booking details. Error: {e}"
     # Check budget threshold
     MINIMUM_BUDGET = 8000.0 # Define minimum budget clearly
     if validated_args.monthly_budget < MINIMUM_BUDGET:
