@@ -191,11 +191,11 @@ def create_calendar_event(start_time: str, summary: str, description: str, atten
         full_description += f"\n\n---\nLead Contact: {lead_email}"
 
     event = {
-        'summary': summary, 
+        'summary': summary,
         'description': full_description,
         'start': {'dateTime': start.isoformat(), 'timeZone': settings.VOICE_AGENT_CONFIG.TIMEZONE},
         'end': {'dateTime': end.isoformat(), 'timeZone': settings.VOICE_AGENT_CONFIG.TIMEZONE},
-        'attendees': [{'email': email} for email in attendees],
+        # 'attendees': [{'email': email} for email in attendees], # <-- REMOVE or COMMENT OUT
         'reminders': {'useDefault': False, 'overrides': [{'method': 'email', 'minutes': 24 * 60}, {'method': 'popup', 'minutes': 10}]},
         'extendedProperties': {
             'private': {
@@ -203,5 +203,6 @@ def create_calendar_event(start_time: str, summary: str, description: str, atten
             }
         }
     }
-    created_event = service.events().insert(calendarId=CALENDAR_ID, body=event, sendUpdates="all").execute()
+    # Change sendUpdates to "none" as we aren't inviting attendees via API
+    created_event = service.events().insert(calendarId=CALENDAR_ID, body=event, sendUpdates="none").execute() # <-- CHANGE sendUpdates
     return created_event

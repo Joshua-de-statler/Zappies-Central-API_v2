@@ -16,6 +16,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, messag
 from collections import defaultdict
 from fastapi.responses import HTMLResponse, JSONResponse
 from dateutil.parser import parse
+from postgrest.exceptions import APIError
 
 # --- Import Harmonized Tools & Schemas ---
 from tools.google_calendar import create_calendar_event, get_available_slots
@@ -194,13 +195,14 @@ async def confirm_meeting(meeting_id: str):
             f"Onboarding call with {meeting_details['full_name']} from {meeting_details['company_name']} to discuss the 'Project Pipeline AI'.\n\n"
             f"Stated Goal: {meeting_details['goal']}\n"
             f"Stated Budget: R{meeting_details['monthly_budget']}/month"
+            f"Lead Phone: {meeting_details.get('client_number', 'N/A')}"
         )
         
         created_event = create_calendar_event(
             start_time=meeting_details['start_time'],
             summary=summary,
             description=description,
-            attendees=[meeting_details['email']]
+            attendees=[]
         )
         
         supabase.table("meetings").update({
@@ -211,7 +213,17 @@ async def confirm_meeting(meeting_id: str):
         logger.info(f"Meeting {meeting_id} confirmed and calendar event created successfully.")
         return "<h1>Thank You!</h1><p>Your meeting has been successfully confirmed. We've added it to our calendar and look forward to speaking with you!</p>"
 
+    except APIError as e:
+        # Specifically catch the error when .single() finds 0 rows
+        if "The result contains 0 rows" in str(e):
+             logger.warning(f"Meeting confirmation attempt for non-existent ID: {meeting_id}")
+             return "<h1>Meeting Not Found</h1><p>This confirmation link is invalid or has expired.</p>"
+        else:
+             # Re-raise other API errors or handle them generally
+             logger.error(f"Supabase API Error during meeting confirmation {meeting_id}: {e}", exc_info=True)
+             return "<h1>Error</h1><p>Sorry, a database error occurred while confirming your meeting. Please try again later.</p>"
     except Exception as e:
+        # Catch other potential errors (like Google Calendar issues)
         logger.error(f"Error confirming meeting {meeting_id}: {e}", exc_info=True)
         return "<h1>Error</h1><p>Sorry, something went wrong while confirming your meeting. Please try again later.</p>"
 
@@ -246,7 +258,7 @@ async def get_voice_availability(request: CheckAvailabilityArgs):
         formatted_suggestions = []
         for slot_iso in slots:
             dt_sast = parse(slot_iso).astimezone(SAST_TZ)
-            human_readable = dt_sast.strftime('%A, %B %d at %-I:%M %p')
+            human_readable = dt_sast.strftime('%A, %B %d at %I:%M %p').replace(' 0', ' ') # Format with padding, then remove leading 0 if present
             formatted_suggestions.append({"human_readable": human_readable, "iso_8061": slot_iso})
 
         return {
