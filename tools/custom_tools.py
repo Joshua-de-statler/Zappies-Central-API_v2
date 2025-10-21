@@ -21,6 +21,7 @@ from .google_calendar import (
     delete_calendar_event
 )
 from .email_sender import send_confirmation_email
+import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
