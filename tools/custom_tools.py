@@ -47,12 +47,19 @@ def book_zappies_onboarding_call_from_json(json_string: str) -> str:
     except (json.JSONDecodeError, ValidationError) as e:
         return f"I'm sorry, there was a problem with the booking details. Error: {e}"
 
-    if validated_args.monthly_budget < 8000:
-        return (
-            "Thank you for sharing that. Based on the budget you provided, it seems like our 'Project Pipeline AI' "
-            "might not be the right fit for your needs at this moment. Our solution is designed for businesses with a "
-            "higher budget for this kind of automation. I appreciate your time and honesty!"
+    # Check budget threshold
+    MINIMUM_BUDGET = 8000.0 # Define minimum budget clearly
+    if validated_args.monthly_budget < MINIMUM_BUDGET:
+        logger.info(f"Booking attempt disqualified for budget below {MINIMUM_BUDGET}. Provided: {validated_args.monthly_budget}")
+        # Rephrase slightly to sound more like a final conclusion for the agent
+        final_message = (
+            f"Okay, thank you for sharing that. Based on the R{validated_args.monthly_budget:.0f}/month budget provided, "
+            "it seems our 'Project Pipeline AI' might not be the best fit right now, as it's designed for businesses "
+            f"with budgets typically starting around R{MINIMUM_BUDGET:.0f}/month for this type of automation. "
+            "I really appreciate your time and honesty!"
         )
+        # Maybe add a prefix the agent might recognize better
+        return f"FINAL_ANSWER_FROM_TOOL: {final_message}" # Or just return final_message if prefix causes issues
 
     # Deconstruct the validated arguments
     full_name = validated_args.full_name
