@@ -114,6 +114,7 @@ def book_zappies_onboarding_call_from_json(json_string: str) -> str:
     start_time = validated_args.start_time
     goal = validated_args.goal
     monthly_budget = validated_args.monthly_budget
+    conversation_id = validated_args.conversation_id 
 
     summary = f"Onboard Call with {company_name} | Zappies AI"
     description = (
