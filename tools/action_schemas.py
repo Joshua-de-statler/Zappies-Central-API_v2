@@ -59,7 +59,9 @@ class CallLogRequest(BaseModel):
     email: Optional[EmailStr] = None
     company_name: Optional[str] = "Not provided"
     goal: Optional[str] = "Not provided"
+    # --- CHANGED TO FLOAT ---
     monthly_budget: Optional[float] = 0.0
+    # --- END CHANGE ---
     resulted_in_meeting: bool = False
     disqualification_reason: Optional[str] = None
     client_number: Optional[str] = None

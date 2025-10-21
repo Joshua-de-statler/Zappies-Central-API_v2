@@ -14,6 +14,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.tools import Tool, render_text_description
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_neo4j import GraphCypherQAChain, Neo4jGraph
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 
 # Local Imports
 from config.settings import settings
@@ -57,9 +58,14 @@ class ToolCallbackHandler(BaseCallbackHandler):
 def create_agent_executor(memory, conversation_id: str):
     """Builds and returns the complete AI agent executor."""
     logger.info("🚀 Creating new agent executor instance...")
+    if not settings.GOOGLE_API_KEY:
+         logger.error("GOOGLE_API_KEY not found in settings.")
+         raise ValueError("Google API Key is not configured.")
+
     llm = ChatGoogleGenerativeAI(
         model=settings.GENERATIVE_MODEL,
         temperature=settings.AGENT_TEMPERATURE,
+        google_api_key=settings.GOOGLE_API_KEY, # Explicitly pass the key
         convert_system_message_to_human=True
     )
 
