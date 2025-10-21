@@ -22,20 +22,17 @@ from .google_calendar import (
 )
 from .email_sender import send_confirmation_email
 import datetime
+from dateutil.parser import parse 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def check_availability(date_input: str) -> str:
+# Use the schema to define the input type correctly for LangChain
+def check_availability(date: str) -> str: # <--- FIX 1: Match the schema argument name 'date'
     """Checks availability for a given date and returns a concise summary."""
-    logger.info(f"--- ACTION: Checking availability for date input: {date_input} ---")
+    logger.info(f"--- ACTION: Checking availability for date: {date} ---") # Log the correct variable
     try:
-        # Handle potential JSON input from agent
-        try:
-            data = json.loads(date_input)
-            date_to_check = data.get('date', date_input)
-        except (json.JSONDecodeError, TypeError):
-            date_to_check = date_input
+        date_to_check = date # <--- FIX 2: Use the 'date' argument directly, remove JSON parsing
 
         # Validate date format before passing to get_available_slots
         try:
