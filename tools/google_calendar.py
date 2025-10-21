@@ -109,7 +109,7 @@ def get_available_slots(date: str) -> list[str]:
             available_slots.append(current_time.isoformat())
             
         # Move to the next slot (can be customized, e.g., 30-min increments)
-        current_time += datetime.timedelta(minutes=15)
+        current_time += datetime.timedelta(minutes=60) 
         
     return available_slots
 

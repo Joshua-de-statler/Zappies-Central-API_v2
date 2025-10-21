@@ -25,27 +25,66 @@ from .email_sender import send_confirmation_email
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def check_availability(date: str) -> str:
-    # This function remains the same
-    logger.info(f"--- ACTION: Checking availability for {date} ---")
+def check_availability(date_input: str) -> str:
+    """Checks availability for a given date and returns a concise summary."""
+    logger.info(f"--- ACTION: Checking availability for date input: {date_input} ---")
     try:
-        data = json.loads(date)
-        date_to_check = data.get('date', date)
-    except (json.JSONDecodeError, TypeError):
-        date_to_check = date
-    available_slots = get_available_slots(date_to_check)
-    logger.info(f"Available slots: {available_slots}")
-    if not available_slots:
-        return f"I'm sorry, but there are no available slots on {date_to_check}. Please try another date."
-    return f"Here are the available slots for {date_to_check}: {', '.join(available_slots)}"
+        # Handle potential JSON input from agent
+        try:
+            data = json.loads(date_input)
+            date_to_check = data.get('date', date_input)
+        except (json.JSONDecodeError, TypeError):
+            date_to_check = date_input
 
-def book_zappies_onboarding_call_from_json(json_string: str) -> str:
-    logger.info(f"--- ACTION: Booking Zappies AI Onboarding Call ---")
-    try:
-        data = json.loads(json_string)
-        validated_args = BookOnboardingCallArgs(**data)
-    except (json.JSONDecodeError, ValidationError) as e:
-        return f"I'm sorry, there was a problem with the booking details. Error: {e}"
+        # Validate date format before passing to get_available_slots
+        try:
+            datetime.datetime.fromisoformat(date_to_check)
+        except ValueError:
+            logger.warning(f"Invalid date format received by check_availability: {date_to_check}")
+            return f"I couldn't check availability because '{date_to_check}' doesn't look like a valid date in YYYY-MM-DD format."
+
+        # Fetch all available slots (still gets the full list internally)
+        available_slots_iso = get_available_slots(date_to_check)
+        logger.info(f"Raw available slots found: {available_slots_iso}")
+
+        if not available_slots_iso:
+            return f"I'm sorry, but there are no available 1-hour slots on {date_to_check}. Please suggest another date."
+
+        # --- CONCISE RESPONSE LOGIC ---
+        # Format only the first few slots for the user
+        suggestions_count = 5 # Show up to 5 suggestions
+        formatted_slots = []
+        hourly_slots_added = set() # Keep track of hours already added
+
+        for slot_iso in available_slots_iso:
+             if len(formatted_slots) >= suggestions_count:
+                 break
+             try:
+                 slot_dt = parse(slot_iso).astimezone(SAST_TZ)
+                 # Only add the top of the hour if not already added
+                 if slot_dt.minute == 0 and slot_dt.hour not in hourly_slots_added:
+                     # Format like "10:00 AM"
+                     formatted_time = slot_dt.strftime('%I:%M %p').lstrip('0') # Use %I, remove leading 0
+                     formatted_slots.append(formatted_time)
+                     hourly_slots_added.add(slot_dt.hour)
+                 # Optionally add half-hour slots if needed, e.g., if slot_dt.minute == 30: ...
+
+             except Exception as e:
+                 logger.error(f"Error parsing/formatting slot '{slot_iso}': {e}")
+                 continue # Skip problematic slots
+
+        if not formatted_slots:
+             # This might happen if only non-hourly slots were found within the limit
+             return f"Yes, there are slots available on {date_to_check}. You can ask the user to pick a specific time or suggest one like 9:00 AM."
+
+        # Construct the final response string
+        slots_str = ", ".join(formatted_slots)
+        response = f"Okay, I found some available times on {date_to_check}. The first few available start times are: {slots_str}. Let me know which one works best, or suggest another time."
+        return response
+
+    except Exception as e:
+        logger.error(f"Unexpected error in check_availability for '{date_input}': {e}", exc_info=True)
+        return "I encountered an error trying to check the availability. Please try again."
 
     # Check budget threshold
     MINIMUM_BUDGET = 8000.0 # Define minimum budget clearly
