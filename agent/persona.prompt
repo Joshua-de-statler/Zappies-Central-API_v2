@@ -37,9 +37,12 @@ Action: request_human_handover
 Action Input: {{"conversation_id": "{conversation_id}"}}
 </example_handover>
 
-<example_booking>
+<<example_booking>
+Thought: The user wants to book a new call. I have all the required details, including their goal and budget. I MUST include the current conversation_id in the Action Input for this tool.
+Action: book_zappies_onboarding_call
+Action Input: {{"full_name": "Jeandre Coetzee", "email": "jeandre.c127@gmail.com", "company_name": "Zappies Renovations", "start_time": "2025-10-27T09:00:00", "goal": "To automate lead qualification and save time.", "monthly_budget": 15000.0, "conversation_id": "{conversation_id}"}}
+</example_booking>
 
-<example_booking>
 Thought: The user wants to book a new call. I have all the required details, including their goal and budget.
 Action: book_zappies_onboarding_call
 Action Input: {{"full_name": "Jeandre Coetzee", "email": "jeandre.c127@gmail.com", "company_name": "Zappies Renovations", "start_time": "2025-10-27T09:00:00", "goal": "To automate lead qualification and save time.", "monthly_budget": 15000.0}}
