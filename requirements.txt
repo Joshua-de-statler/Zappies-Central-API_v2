@@ -23,6 +23,7 @@ tiktoken
 python-dateutil
 pytz  # Added for robust timezone handling
 email_validator  # Added for email validation in Pydantic models
+twilio
 
 # --- Google Calendar API ---
 google-api-python-client

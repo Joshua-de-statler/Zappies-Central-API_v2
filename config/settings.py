@@ -64,6 +64,11 @@ class Settings:
         "HAS_CONDITION", "MUST_PERFORM", "HAS_FEE"
     ]
 
+    # --- Twilio Configuration ---
+    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID")
+    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN")
+    TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER")
+
     # --- Voice Agent Business Logic ---
     # Nested class to group voice agent settings
     class VOICE_AGENT_CONFIG:

@@ -17,6 +17,7 @@ from collections import defaultdict
 from fastapi.responses import HTMLResponse, JSONResponse
 from dateutil.parser import parse
 from postgrest.exceptions import APIError
+from tools.notifications import send_sms_confirmation
 
 # --- Import Harmonized Tools & Schemas ---
 from tools.google_calendar import create_calendar_event, get_available_slots
@@ -211,6 +212,21 @@ async def confirm_meeting(meeting_id: str):
         }).eq("id", meeting_id).execute()
         
         logger.info(f"Meeting {meeting_id} confirmed and calendar event created successfully.")
+        
+        # --- ADD SMS CONFIRMATION ---
+        client_number = meeting_details.get("client_number")
+        if client_number: # Only send if number exists in the meeting record
+            try:
+                start_time_sast = parse(meeting_details['start_time']).astimezone(SAST_TZ)
+                human_readable_time = start_time_sast.strftime('%A, %B %d at %I:%M %p %Z').replace(' 0', ' ')
+                send_sms_confirmation(
+                    recipient_phone_number=client_number,
+                    full_name=meeting_details['full_name'],
+                    start_time_str=human_readable_time
+                )
+            except Exception as sms_error:
+                 logger.error(f"Failed to send SMS confirmation for confirmed meeting {meeting_id} to {client_number}: {sms_error}", exc_info=True)
+
         return "<h1>Thank You!</h1><p>Your meeting has been successfully confirmed. We've added it to our calendar and look forward to speaking with you!</p>"
 
     except APIError as e:
@@ -362,11 +378,24 @@ async def book_voice_appointment(request: VoiceBookingRequest):
             # Log the error, but don't fail the entire booking
             logger.error(f"Failed to send direct confirmation email for {request.email}: {email_error}", exc_info=True)
 
-        # 6. Return the specific success message for the voice agent
+        # --- 6. ADD SMS CONFIRMATION ---
+        if request.client_number: # Only send if number is provided
+            try:
+                # Use the same formatted time string
+                send_sms_confirmation(
+                    recipient_phone_number=request.client_number,
+                    full_name=request.name,
+                    start_time_str=human_readable_time_for_email # Use formatted time
+                )
+            except Exception as sms_error:
+                # Log error but don't fail the request
+                logger.error(f"Failed to send SMS confirmation to {request.client_number}: {sms_error}", exc_info=True)
+        
+        # 7. Return the specific success message for the voice agent
         first_name = request.name.strip().split(' ')[0]
         success_message = (
             f"Perfect, {first_name}! I've successfully booked your 1-hour call. "
-            f"I've just sent a confirmation email and a calendar invitation to {request.email} to confirm."
+            f"I've just sent a confirmation email and SMS, and a calendar invitation to {request.email} to confirm."
         )
         return {"message": success_message}
 
