@@ -365,7 +365,7 @@ async def book_voice_appointment(request: VoiceBookingRequest):
         supabase.table("call_history").insert(call_data).execute()
         logger.info(f"Successfully logged booked call to 'call_history' for {request.email}.")
         
-        # 5. Prepare human-readable time (do this BEFORE try blocks)
+    # 5. Prepare human-readable time (do this BEFORE try blocks)
         human_readable_time = "the scheduled time" # Default
         try:
             start_time_sast = parse(request.start_time).astimezone(SAST_TZ)
