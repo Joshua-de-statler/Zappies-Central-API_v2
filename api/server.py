@@ -365,39 +365,51 @@ async def book_voice_appointment(request: VoiceBookingRequest):
         supabase.table("call_history").insert(call_data).execute()
         logger.info(f"Successfully logged booked call to 'call_history' for {request.email}.")
         
-        # 5. Send direct confirmation email
-        human_readable_time_for_email = "the scheduled time" # Default
+        # 5. Prepare human-readable time (do this BEFORE try blocks)
+        human_readable_time = "the scheduled time" # Default
         try:
             start_time_sast = parse(request.start_time).astimezone(SAST_TZ)
             # Format for email and SMS
-            human_readable_time_for_email = start_time_sast.strftime('%A, %B %d at %I:%M %p %Z').replace(' 0', ' ')
-            send_direct_booking_confirmation(
+            human_readable_time = start_time_sast.strftime('%A, %B %d at %I:%M %p %Z').replace(' 0', ' ')
+        except Exception as time_parse_error:
+             logger.error(f"Error parsing start_time for notifications {request.email}: {time_parse_error}")
+             # Proceed with default time string if parsing fails for notifications
+
+        # 6. Send direct confirmation email
+        email_sent_successfully = False # Track success specifically
+        try:
+            send_direct_booking_confirmation( # Use boolean return value
                 recipient_email=request.email,
                 full_name=request.name,
-                start_time=human_readable_time_for_email
+                start_time=human_readable_time # Use pre-calculated time
             )
+            email_sent_successfully = True # Mark as successful if no exception
         except Exception as email_error:
             logger.error(f"Failed to send direct confirmation email for {request.email}: {email_error}", exc_info=True)
 
-        # --- 6. ADD SMS CONFIRMATION ---
-        if request.client_number: # Only send if number is provided
+        # 7. Send SMS confirmation
+        sms_attempted = False # Track if SMS was attempted
+        if request.client_number:
+            sms_attempted = True # Mark as attempted
             try:
-                # Use the same formatted time string
                 send_sms_confirmation(
                     recipient_phone_number=request.client_number,
                     full_name=request.name,
-                    start_time_str=human_readable_time_for_email # Use formatted time
+                    start_time_str=human_readable_time # Use pre-calculated time
                 )
             except Exception as sms_error:
-                # Log error but don't fail the request
                 logger.error(f"Failed to send SMS confirmation to {request.client_number}: {sms_error}", exc_info=True)
-        # --- END SMS CONFIRMATION ---
+                # sms_attempted remains True as it was attempted
 
-        # 7. Return success message (Adjust wording slightly)
+        # 8. Return the specific success message (Conditional)
         first_name = request.name.strip().split(' ')[0]
+        email_part = "a confirmation email" if email_sent_successfully else "attempted to send a confirmation email"
+        # --- MODIFIED SMS PART ---
+        sms_part = " and SMS" if sms_attempted else "" # Only include "and SMS" if it was ATTEMPTED
+        # --- END MODIFICATION ---
         success_message = (
             f"Perfect, {first_name}! I've successfully booked your 1-hour call. "
-            f"I've just sent a confirmation email and SMS, and a calendar invitation to {request.email} will follow shortly."
+            f"I've just sent {email_part}{sms_part}, and a calendar invitation to {request.email} will follow shortly."
         )
         return {"message": success_message}
 
