@@ -365,17 +365,18 @@ async def book_voice_appointment(request: VoiceBookingRequest):
         supabase.table("call_history").insert(call_data).execute()
         logger.info(f"Successfully logged booked call to 'call_history' for {request.email}.")
         
-        # 5. Send direct confirmation email (Your requested feature)
+        # 5. Send direct confirmation email
+        human_readable_time_for_email = "the scheduled time" # Default
         try:
             start_time_sast = parse(request.start_time).astimezone(SAST_TZ)
-            human_readable_time = start_time_sast.strftime('%A, %B %d at %-I:%M %p %Z')
+            # Format for email and SMS
+            human_readable_time_for_email = start_time_sast.strftime('%A, %B %d at %I:%M %p %Z').replace(' 0', ' ')
             send_direct_booking_confirmation(
                 recipient_email=request.email,
                 full_name=request.name,
-                start_time=human_readable_time
+                start_time=human_readable_time_for_email
             )
         except Exception as email_error:
-            # Log the error, but don't fail the entire booking
             logger.error(f"Failed to send direct confirmation email for {request.email}: {email_error}", exc_info=True)
 
         # --- 6. ADD SMS CONFIRMATION ---
@@ -390,12 +391,13 @@ async def book_voice_appointment(request: VoiceBookingRequest):
             except Exception as sms_error:
                 # Log error but don't fail the request
                 logger.error(f"Failed to send SMS confirmation to {request.client_number}: {sms_error}", exc_info=True)
-        
-        # 7. Return the specific success message for the voice agent
+        # --- END SMS CONFIRMATION ---
+
+        # 7. Return success message (Adjust wording slightly)
         first_name = request.name.strip().split(' ')[0]
         success_message = (
             f"Perfect, {first_name}! I've successfully booked your 1-hour call. "
-            f"I've just sent a confirmation email and SMS, and a calendar invitation to {request.email} to confirm."
+            f"I've just sent a confirmation email and SMS, and a calendar invitation to {request.email} will follow shortly."
         )
         return {"message": success_message}
 
