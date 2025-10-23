@@ -45,3 +45,44 @@ def send_sms_confirmation(recipient_phone_number: str, full_name: str, start_tim
     except Exception as e:
         logger.error(f"An unexpected error occurred sending SMS to {recipient_phone_number}: {e}")
         return False
+    
+def send_sms_reminder(recipient_phone_number: str, full_name: str, start_time_str: str, reminder_type: str):
+    """Sends a scheduled reminder SMS for an upcoming meeting."""
+    
+    if not all([settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN, settings.TWILIO_PHONE_NUMBER]):
+        logger.error("Twilio credentials not configured. Cannot send SMS reminder.")
+        return False
+
+    # Ensure number is in E.164 format
+    if not recipient_phone_number.startswith('+'):
+         if len(recipient_phone_number) == 10 and recipient_phone_number.startswith('0'):
+             recipient_phone_number = f"+27{recipient_phone_number[1:]}"
+         else:
+             logger.warning(f"Reminder SMS: Invalid phone number format {recipient_phone_number}. Skipping.")
+             return False
+
+    client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    first_name = full_name.split(' ')[0]
+
+    # Customize message based on reminder type
+    if reminder_type == "24h":
+        message_body = f"Hi {first_name}, this is a reminder from Zappies AI. Your onboarding call is scheduled for tomorrow at {start_time_str}. We look forward to speaking with you!"
+    elif reminder_type == "morning":
+        message_body = f"Hi {first_name}, this is a reminder from Zappies AI. Your onboarding call is today at {start_time_str}. See you soon!"
+    elif reminder_type == "1h":
+        message_body = f"Hi {first_name}, your Zappies AI onboarding call is starting in about one hour, at {start_time_str}."
+    else:
+        logger.warning(f"Unknown reminder type: {reminder_type}")
+        return False
+
+    try:
+        message = client.messages.create(
+            body=message_body,
+            from_=settings.TWILIO_PHONE_NUMBER,
+            to=recipient_phone_number
+        )
+        logger.info(f"SMS reminder ({reminder_type}) sent successfully to {recipient_phone_number} (SID: {message.sid})")
+        return True
+    except TwilioRestException as e:
+        logger.error(f"Failed to send SMS reminder ({reminder_type}) to {recipient_phone_number}: {e}")
+        return False
