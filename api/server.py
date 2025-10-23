@@ -4,8 +4,6 @@ import logging
 import datetime
 import pytz
 import json
-import atexit
-from apscheduler.schedulers.background import BackgroundScheduler
 from tools.scheduler import send_meeting_reminders
 
 from fastapi import FastAPI, HTTPException, Depends, Header, status
@@ -433,30 +431,21 @@ async def book_voice_appointment(request: VoiceBookingRequest):
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
     
 # --- ================================= ---
-# --- BACKGROUND SCHEDULER (NEW)
+# --- SCHEDULED TASK ENDPOINT (NEW)
 # --- ================================= ---
 
-# Initialize the scheduler in the correct timezone
-scheduler = BackgroundScheduler(timezone=str(SAST_TZ))
-
-# Add the job to run every 30 minutes
-scheduler.add_job(
-    send_meeting_reminders,
-    'interval',
-    minutes=30,
-    id='send_meeting_reminders_job',
-    replace_existing=True
-)
-
-# Start the scheduler
-try:
-    scheduler.start()
-    logger.info("Background scheduler started successfully.")
-    # Register a shutdown hook
-    atexit.register(lambda: scheduler.shutdown())
-except Exception as e:
-    logger.error(f"Failed to start background scheduler: {e}", exc_info=True)
-
-# Note: Uvicorn's --reload flag can cause the scheduler to run twice.
-# It's recommended to run in production (like on Railway) with reload=False.
-# Your main.py seems to have reload=False set for production, which is good.
+@app.post("/tasks/send-reminders", dependencies=[Depends(verify_api_key)])
+async def trigger_send_reminders():
+    """
+    Secure endpoint to be called by a cron job (e.g., Railway Cron)
+    to trigger the sending of meeting reminders.
+    """
+    try:
+        logger.info("Task: /tasks/send-reminders endpoint triggered.")
+        # Call your scheduler function directly
+        send_meeting_reminders()
+        return {"status": "success", "message": "Reminder job executed."}
+    except Exception as e:
+        logger.error(f"Error in /tasks/send-reminders endpoint: {e}", exc_info=True)
+        # Return a 500 error so the cron job log shows a failure
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
