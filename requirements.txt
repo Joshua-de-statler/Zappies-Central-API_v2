@@ -3,7 +3,7 @@ fastapi
 uvicorn
 gunicorn[uvloop]  # Added for production server
 
-# --- AI & LangChain (Modern, compatible versions) ---
+# --- AI & LangChain (Modern, compatible versions) force redo---
 langchain==1.0.0rc2
 langchain-community
 langchain-experimental
