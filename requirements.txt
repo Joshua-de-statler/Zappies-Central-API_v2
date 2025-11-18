@@ -6,7 +6,7 @@ gunicorn[uvloop]  # Added for production server
 # --- AI & LangChain (Modern, compatible versions) ---
 langchain==1.0.3
 langchain-community
-langchain-experimenta
+langchain-experimental
 langchain-google-genai
 langchain-neo4j
 langchain-text-splitters
