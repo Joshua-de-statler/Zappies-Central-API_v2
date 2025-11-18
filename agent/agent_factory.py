@@ -6,7 +6,7 @@ import uuid
 import json 
 
 # LangChain Imports
-from langchain.agents import AgentExecutor, create_react_agent
+from langchain.agents.agent import AgentExecutor, create_react_agent
 from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_core.documents import Document
